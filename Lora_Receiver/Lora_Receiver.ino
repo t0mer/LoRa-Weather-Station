@@ -3,6 +3,10 @@
 #include <WiFi.h>
 #include <PubSubClient.h>  // MQTT library
 #include <ArduinoJson.h>   // JSON library
+#include <HTTPClient.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 #define BAND 433E6 // Change this to your desired frequency band (433E6, 868E6, 915E6)
 #define SCK 5
@@ -11,6 +15,12 @@
 #define SS 18
 #define RST 14
 #define DIO0 26
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
 String LoRaData;
 
 // WiFi credentials
@@ -25,6 +35,10 @@ const char* mqtt_password = "";
 const char* mqtt_lora_info = "station/radio";
 const char* mqtt_lora_payload = "station/data";
 const char* mqtt_clientid = "wstation";
+const char* thingsboardServer = ""; // e.g., "demo.thingsboard.io"
+const String accessToken = "";
+
+
 
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
@@ -55,24 +69,45 @@ void reconnect() {
      }
  }
 
-  // while (!client.connected()) {
-  //   Serial.print("Attempting MQTT connection...");
-  //   int rc = client.connect("ESP32Client", mqtt_username, mqtt_password);
-  //   if (rc == 0) {
-  //     Serial.println("connected");
-      
-  //   } else {
-  //     Serial.print("failed, rc=");
-  //     Serial.println(client.state());
-  //     Serial.println(" try again in 5 seconds");
-  //     delay(5000);
-  //   }
-  // }
+}
+
+void sendDataToThingsBoard(const String& payload) {
+  HTTPClient http;
+  
+  String url = String(thingsboardServer) + "/api/v1/" + accessToken + "/telemetry";
+
+  http.begin(url);
+
+  http.addHeader("Content-Type", "application/json");
+
+  // String payload = payload; // Example telemetry data
+
+  int httpResponseCode = http.POST(payload);
+
+  if(httpResponseCode > 0) {
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+  } else {
+    Serial.print("Error code: ");
+    Serial.println(httpResponseCode);
+  }
+
+  http.end();
 }
 
 
 void setup() {
   Serial.begin(115200);
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+
+  delay(1000);
+  display.clearDisplay();
+  display.setTextSize(1);
+
+
   Serial.println("LoRa Receiver Test");
   setup_wifi();
   client.setServer( mqtt_server, mqtt_port);
@@ -106,14 +141,24 @@ void loop() {
     int sf = LoRa.getSpreadingFactor();
     // Frequency
     int frequency = LoRa.getFrequency();
+
+
+    display.setTextColor(WHITE);
+    display.setCursor(0, 20);
+    display.println("RSSI: " + String(rssi) + "dbm");
+    display.setCursor(0, 30);
+    display.println("SNR: " + String(snr));
+    display.display();
+
     DynamicJsonDocument lorainfo(1024);
     lorainfo["rssi"] = rssi;
     lorainfo["snr"] = snr;
     lorainfo["sf"] = sf;
     lorainfo["frequency"] = frequency;
-    char jsonBuffer[512];
-    serializeJson(lorainfo, jsonBuffer);
-    client.publish(mqtt_lora_info, jsonBuffer);
+    char radioinfo[512];
+    serializeJson(lorainfo, radioinfo);
+    client.publish(mqtt_lora_info, radioinfo);
+    sendDataToThingsBoard(radioinfo);
     
     // Data
     while (LoRa.available()) {
@@ -121,6 +166,10 @@ void loop() {
       char mqttPayload[LoRaData.length() + 1];  // Create a character array with enough space
       LoRaData.toCharArray(mqttPayload, sizeof(mqttPayload)); // Convert String to character array
       client.publish(mqtt_lora_payload, mqttPayload); // Publish the character array
+      sendDataToThingsBoard(mqttPayload);
     }
   }
 }
+
+
+
