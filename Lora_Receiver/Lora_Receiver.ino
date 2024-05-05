@@ -20,7 +20,7 @@
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
+const int ledPin = 4;
 String LoRaData;
 
 // WiFi credentials
@@ -68,7 +68,6 @@ void reconnect() {
          delay(5000);
      }
  }
-
 }
 
 void sendDataToThingsBoard(const String& payload) {
@@ -102,13 +101,8 @@ void setup() {
     Serial.println(F("SSD1306 allocation failed"));
     for(;;);
   }
-
-  delay(1000);
-  display.clearDisplay();
-  display.setTextSize(1);
-
-
   Serial.println("LoRa Receiver Test");
+  pinMode(ledPin, OUTPUT);
   setup_wifi();
   client.setServer( mqtt_server, mqtt_port);
   reconnect();
@@ -132,6 +126,7 @@ void loop() {
 
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
+    digitalWrite(ledPin, HIGH);
     Serial.println("Received packet:");
     // RSSI
     int rssi = LoRa.packetRssi();
@@ -142,7 +137,8 @@ void loop() {
     // Frequency
     int frequency = LoRa.getFrequency();
 
-
+    display.setTextSize(1);
+    display.clearDisplay();
     display.setTextColor(WHITE);
     display.setCursor(0, 20);
     display.println("RSSI: " + String(rssi) + "dbm");
@@ -159,7 +155,7 @@ void loop() {
     serializeJson(lorainfo, radioinfo);
     client.publish(mqtt_lora_info, radioinfo);
     sendDataToThingsBoard(radioinfo);
-    
+    digitalWrite(ledPin, LOW); // Turn LED off
     // Data
     while (LoRa.available()) {
       LoRaData = LoRa.readString();
