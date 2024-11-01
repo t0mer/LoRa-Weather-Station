@@ -4,6 +4,9 @@
 #include <LoRa.h>
 #include "DHT.h"
 #include <ArduinoJson.h>   // JSON library
+#include <Wire.h>
+#include <BH1750.h>
+#include <Adafruit_BMP085.h>
 
 #define BAND 433E6 // Change this to your desired frequency band (433E6, 868E6, 915E6)
 #define SCK 5
@@ -15,13 +18,16 @@
 #define TIME_TO_SLEEP 120 * 1e6  // Sleep for 120 seconds
 // Define the LED pin
 #define LED_PIN 2
-
 #define DHTPIN 4         // DHT11 data pin
 #define DHTTYPE DHT22   // DHT 11
+#define RAIN_SENSOR_DIGITAL_PIN 15
+#define RAIN_SENSOR_ANALOG_PIN 13
 DHT dht(DHTPIN, DHTTYPE);
 RTC_DATA_ATTR int bootCount = 0;
 int TX_POWER = 20;
 
+Adafruit_BMP085 bmp;
+BH1750 lightMeter;
 
 void setup() {
   // Disable Wi-Fi
@@ -29,12 +35,29 @@ void setup() {
   WiFi.disconnect(true);
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
-  // delay(1000); // Wait for console to connect
+  pinMode(RAIN_SENSOR_DIGITAL_PIN, INPUT);
+  Wire.begin();  // Initialize I2C bus
+  
   Serial.println("Starting");
-
   SPI.begin(SCK, MISO, MOSI, SS);
   LoRa.setPins(SS, RST, DIO0);
-  
+
+  // Initialize BH1750
+  if (!lightMeter.begin()) {
+    Serial.println("Error initializing BH1750!");
+    while (1);
+  }
+  Serial.println("BH1750 initialized.");
+
+  // Initialize BMP180
+  if (!bmp.begin()) {
+    Serial.println("Error initializing BMP180!");
+    while (1);
+  }
+  Serial.println("BMP180 initialized.");
+
+
+
 }
 
 void loop(){
@@ -55,10 +78,30 @@ void loop(){
     Serial.println(F("Failed to read from DHT sensor!"));
     return;
   }
+  int rainDetected = digitalRead(RAIN_SENSOR_DIGITAL_PIN);
+  int rainIntensity = analogRead(RAIN_SENSOR_ANALOG_PIN);
+  Serial.print("Rain Intensity: ");
+  Serial.println(rainIntensity);
+
+
+
+
+  float lux = lightMeter.readLightLevel();
+  float pressure = bmp.readPressure() / 100.0;  // Convert Pa to hPa (or mbar)
+
 
   DynamicJsonDocument doc(1024);
   doc["Humidity"] = h;
   doc["Temperature"] = t;
+  doc["light"] = lux ; 
+  doc["pressure"] = pressure;
+
+  if (rainDetected == LOW) {
+    doc["raining"] = "Raining";
+  } else {
+    doc["raining"] = "Not Raining";
+  }  
+
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer);
   digitalWrite(LED_PIN, HIGH);
